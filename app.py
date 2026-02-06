@@ -4,6 +4,7 @@ import numpy as np
 import keras
 import tensorflow as tf
 import os
+from fastapi.middleware.cors import CORSMiddleware
 
 # -----------------------
 # Sanity check
@@ -24,6 +25,14 @@ model = keras.layers.TFSMLayer(
 app = FastAPI(
     title="DNN Inference API",
     version="1.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # TEMP: allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # -----------------------
