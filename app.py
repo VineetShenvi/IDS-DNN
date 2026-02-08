@@ -5,6 +5,10 @@ import keras
 import tensorflow as tf
 import os
 from fastapi.middleware.cors import CORSMiddleware
+import shap
+import pandas as pd
+import pickle
+
 
 # -----------------------
 # Sanity check
@@ -18,6 +22,29 @@ model = keras.layers.TFSMLayer(
     "model",
     call_endpoint="serving_default"
 )
+
+# -----------------------
+# Load XAI artifacts
+# -----------------------
+feature_names = pickle.load(open("features.pkl", "rb"))
+background = pd.read_csv("background.csv").values
+
+inputs = keras.Input(shape=(52,), dtype=tf.float32)
+outputs = model(inputs)
+shapModel = keras.Model(inputs=inputs, outputs=outputs)
+
+def model_predict(x):
+    x = tf.convert_to_tensor(x, dtype=tf.float32)
+    preds = shapModel(x)
+
+    # handle dict output from SavedModel
+    if isinstance(preds, dict):
+        preds = list(preds.values())[0]
+
+    return preds.numpy()
+
+background = background[:30]  # keep small
+explainer = shap.KernelExplainer(model_predict, background)
 
 # -----------------------
 # FastAPI app
@@ -93,3 +120,44 @@ def predict(data: DNNInput):
         "label": label,
         "confidence": confidence
     }
+
+@app.post("/explain")
+def explain(data: DNNInput):
+
+    if len(data.features) != EXPECTED_FEATURES:
+        return {"error": "Invalid feature count"}
+
+    X = np.array(data.features, dtype=np.float32).reshape(1, -1)
+
+    shap_values = explainer.shap_values(X, nsamples=100)
+
+    if isinstance(shap_values, list):
+        shap_values = shap_values[0]
+
+    impacts = shap_values[0]
+
+
+    top = sorted(
+        zip(feature_names, impacts),
+        key=lambda x: abs(x[1]),
+        reverse=True
+    )[:6]
+
+    chart_data = [
+        {
+            "feature": name,
+            "impact": float(value),
+            "direction": "increase" if value > 0 else "decrease"
+        }
+        for name, value in top
+    ]
+
+    return {
+        "chart": {
+            "type": "bar",
+            "xKey": "feature",
+            "yKey": "impact",
+            "data": chart_data
+        }
+    }
+
